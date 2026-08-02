@@ -80,12 +80,14 @@ export class Painter {
         size: number;
     } | null;
     /**
-     * Shared scratch FBO (color + depth-stencil) used by `{line,fill}-layer-opacity`.
+     * Shared scratch FBO (color + depth-stencil) used by `{line,fill}-layer-opacity` and `{line,fill}-layer-blend`.
      * The layer is rendered into this FBO, then composited into whatever framebuffer was previously bound
      * The canvas in the flat case, the per-terrain-tile RTT texture in the terrain case.
      * Resized in place to match the target dimensions.
      */
-    layerOpacityFbo: Framebuffer | null;
+    layerCompositeFbo: Framebuffer | null;
+    /** Copy of the composite target, sampled as the backdrop by non-normal layer blending. */
+    layerCompositeBackdrop: {texture: WebGLTexture; width: number; height: number} | null;
     width: number;
     height: number;
     tileExtentBuffer: VertexBuffer;
@@ -116,7 +118,8 @@ export class Painter {
         this.drawFunctions = webglDrawFunctions;
         this.context = new Context(gl);
         this.programCache = new ProgramCache(this.context);
-        this.layerOpacityFbo = null;
+        this.layerCompositeFbo = null;
+        this.layerCompositeBackdrop = null;
         this._tileTextures = {};
         this._rttObjectRecyclePool = [];
         this._rttSharedFbo = null;
@@ -590,8 +593,13 @@ export class Painter {
 
         this.destroyRTTResources();
 
-        this.layerOpacityFbo?.destroy();
-        this.layerOpacityFbo = null;
+        this.layerCompositeFbo?.destroy();
+        this.layerCompositeFbo = null;
+
+        if (this.layerCompositeBackdrop) {
+            this.context.gl.deleteTexture(this.layerCompositeBackdrop.texture);
+            this.layerCompositeBackdrop = null;
+        }
 
         if (this.tileExtentBuffer) this.tileExtentBuffer.destroy();
         if (this.debugBuffer) this.debugBuffer.destroy();
