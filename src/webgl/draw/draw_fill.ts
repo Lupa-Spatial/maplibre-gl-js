@@ -28,7 +28,7 @@ export function drawFill(painter: Painter, tileManager: TileManager, layer: Fill
     const layerBlend = layer.paint.get('fill-layer-blend');
     if (layerOpacity < 1 || layerBlend !== 'normal') {
         if (frameRenderContext.currentPass !== 'translucent') return;
-        const results = prepareDrawLayerComposite(painter, layer, coords, frameRenderContext);
+        const results = prepareDrawLayerComposite(painter, tileManager, coords, frameRenderContext);
         drawFillAndOutline(tileManager, layer, coords, frameRenderContext);
         drawLayerComposite(painter, layerOpacity, layerBlend, results, layer, frameRenderContext);
         return;
