@@ -2,8 +2,8 @@
   "version": 8,
   "metadata": {
     "test": {
-      "width": 521,
-      "height": 521,
+      "width": 256,
+      "height": 256,
       "allowed": 0.005
     }
   },
@@ -11,7 +11,7 @@
     11.52517,
     47.34487
   ],
-  "zoom": 13,
+  "zoom": 12,
   "sources": {
     "terrain": {
       "type": "raster-dem",
@@ -19,14 +19,6 @@
         "local://tiles/terrain-shading/{z}-{x}-{y}.terrain.png"
       ],
       "maxzoom": 12,
-      "tileSize": 256
-    },
-    "osm": {
-      "type": "raster",
-      "tiles": [
-        "local://tiles/number/{z}.png"
-      ],
-      "maxzoom": 17,
       "tileSize": 256
     },
     "geojson": {
@@ -42,24 +34,20 @@
               "coordinates": [
                 [
                   [
-                    11.51,
-                    47.337
+                    11.509,
+                    47.3355
                   ],
                   [
-                    11.54,
-                    47.337
+                    11.541,
+                    47.3355
                   ],
                   [
-                    11.54,
-                    47.357
+                    11.525,
+                    47.356
                   ],
                   [
-                    11.51,
-                    47.357
-                  ],
-                  [
-                    11.51,
-                    47.337
+                    11.509,
+                    47.3355
                   ]
                 ]
               ]
@@ -71,11 +59,18 @@
   },
   "layers": [
     {
-      "id": "raster",
-      "type": "raster",
-      "source": "osm",
+      "id": "background",
+      "type": "background",
       "paint": {
-        "raster-opacity": 1
+        "background-color": "#cbb994"
+      }
+    },
+    {
+      "id": "hillshade",
+      "type": "hillshade",
+      "source": "terrain",
+      "paint": {
+        "hillshade-shadow-color": "#473b24"
       }
     },
     {
@@ -83,7 +78,7 @@
       "type": "fill",
       "source": "geojson",
       "paint": {
-        "fill-color": "#ff0000",
+        "fill-color": "#90ee90",
         "fill-layer-blend": "multiply"
       }
     }
