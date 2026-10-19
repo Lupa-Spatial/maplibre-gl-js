@@ -234,6 +234,4 @@ export function drawLayerComposite(painter: Painter, opacity: number, blend: Lay
 
     gl.disable(gl.SCISSOR_TEST);
 
-    // Clipping masks went into the scratch FBO's stencil buffer, so a later layer on the same source must redraw its own.
-    painter.currentStencilSource = undefined;
 }
