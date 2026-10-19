@@ -6,6 +6,7 @@ import {layerCompositeUniformValues} from '../program/layer_composite_program.ts
 import {Color} from '@maplibre/maplibre-gl-style-spec';
 import {EXTENT} from '../../data/extent.ts';
 
+import type {FrameRenderContext} from '../../render/frame_render_context.ts';
 import type {Painter} from '../../render/painter.ts';
 import type {TileManager} from '../../tile/tile_manager.ts';
 import type {LineStyleLayer} from '../../style/style_layer/line_style_layer.ts';
@@ -16,12 +17,13 @@ import type {OverscaledTileID} from '../../tile/tile_id.ts';
 /** The `{line,fill}-layer-blend` values, which the style spec keeps identical for both layer types. */
 export type LayerBlend = FillPaintPropsPossiblyEvaluated['fill-layer-blend'];
 
-/** Blend modes evaluated in the shader. Only these need a copy of the backdrop. */
+/**
+ * Blend modes evaluated in the shader, each requiring a copy of the backdrop.
+ * Non-separable modes share helpers gated by a dedicated define because defines end in semicolons.
+ */
 const shaderBlendDefines = {
     multiply: ['#define LAYER_BLEND;', '#define LAYER_BLEND_MULTIPLY;'],
     overlay: ['#define LAYER_BLEND;', '#define LAYER_BLEND_OVERLAY;'],
-    // Both W3C non-separable modes share their helpers, gated on the extra `NONSEPARABLE` define:
-    // the defines carry a trailing `;`, so a `#if defined(A) || defined(B)` expression fails to parse.
     color: ['#define LAYER_BLEND;', '#define LAYER_BLEND_NONSEPARABLE;', '#define LAYER_BLEND_COLOR;'],
     luminosity: ['#define LAYER_BLEND;', '#define LAYER_BLEND_NONSEPARABLE;']
 } satisfies Partial<Record<LayerBlend, string[]>>;
@@ -53,14 +55,14 @@ const TILE_CORNERS = [
  * Falls back to the whole viewport whenever the corners do not bound the drawn area: subdivision curves the
  * tile edges, terrain draws into a tile-local RTT viewport, and a corner behind the camera projects to infinity.
  */
-function getCoordsViewportBounds(painter: Painter, coords: OverscaledTileID[], terrain: boolean): [number, number, number, number] {
-    const [, , viewportWidth, viewportHeight] = painter.context.viewport.get();
+function getCoordsViewportBounds(frameRenderContext: FrameRenderContext, coords: OverscaledTileID[]): [number, number, number, number] {
+    const [, , viewportWidth, viewportHeight] = frameRenderContext.context.viewport.get();
     const wholeViewport: [number, number, number, number] = [0, 0, viewportWidth, viewportHeight];
 
     if (coords.length === 0) {
         return [0, 0, 0, 0];
     }
-    if (terrain || painter.style.projection.useSubdivision) {
+    if (frameRenderContext.terrain || frameRenderContext.data.useSubdivision) {
         return wholeViewport;
     }
 
@@ -72,7 +74,7 @@ function getCoordsViewportBounds(painter: Painter, coords: OverscaledTileID[], t
     for (const coord of coords) {
         const unwrapped = coord.toUnwrapped();
         for (const [cx, cy] of TILE_CORNERS) {
-            const {point, signedDistanceFromCamera} = painter.transform.projectTileCoordinates(cx, cy, unwrapped, null);
+            const {point, signedDistanceFromCamera} = frameRenderContext.transform.projectTileCoordinates(cx, cy, unwrapped, null);
             if (signedDistanceFromCamera <= 0) return wholeViewport;
 
             const sx = (point.x + 1) * 0.5 * viewportWidth;
@@ -100,9 +102,10 @@ function getCoordsViewportBounds(painter: Painter, coords: OverscaledTileID[], t
 /**
  * Partial `{line,fill}-layer-opacity` / `{line,fill}-layer-blend`:
  * render the whole layer to a scratch FBO so it composites as one surface instead of per feature.
+ * Only tiles with a bucket contribute to the composite bounds.
  */
-export function prepareDrawLayerComposite(painter: Painter, tileManager: TileManager, layer: LineStyleLayer | FillStyleLayer, coords: OverscaledTileID[], terrain: boolean): PrepareDrawLayerCompositeResult {
-    const context = painter.context;
+export function prepareDrawLayerComposite(painter: Painter, tileManager: TileManager, layer: LineStyleLayer | FillStyleLayer, coords: OverscaledTileID[], frameRenderContext: FrameRenderContext): PrepareDrawLayerCompositeResult {
+    const context = frameRenderContext.context;
     const compositeTarget = context.bindFramebuffer.get();
     const compositeViewport = context.viewport.get();
     const [, , width, height] = compositeViewport;
@@ -112,12 +115,11 @@ export function prepareDrawLayerComposite(painter: Painter, tileManager: TileMan
     context.viewport.set([0, 0, width, height]);
     context.clear({color: Color.transparent, depth: 1, stencil: 0});
 
-    painter.currentStencilSource = undefined;
-    painter.renderTileClippingMasks(layer, coords, terrain);
+    frameRenderContext.invalidateTileClippingMasks();
+    frameRenderContext.renderTileClippingMasks(layer, coords);
 
-    // Tiles without a bucket are skipped by the tile draw loops, so they must not widen the box either.
     const drawnCoords = coords.filter((coord) => tileManager.getTile(coord)?.getBucket(layer));
-    const bounds = getCoordsViewportBounds(painter, drawnCoords, terrain);
+    const bounds = getCoordsViewportBounds(frameRenderContext, drawnCoords);
 
     return {
         compositeTarget,
@@ -186,15 +188,20 @@ function copyBackdrop(painter: Painter, x: number, y: number, width: number, hei
     gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, width, height);
 }
 
-export function drawLayerComposite(painter: Painter, opacity: number, blend: LayerBlend, prepareResult: PrepareDrawLayerCompositeResult, layer: LineStyleLayer | FillStyleLayer): void {
-    const context = painter.context;
+/**
+ * Composites the scratch layer into the saved target and restores its viewport even for empty bounds.
+ * Shader blend results replace the target; fixed-function modes blend on the GPU.
+ * Tile clipping masks must be redrawn after switching stencil buffers.
+ */
+export function drawLayerComposite(painter: Painter, opacity: number, blend: LayerBlend, prepareResult: PrepareDrawLayerCompositeResult, layer: LineStyleLayer | FillStyleLayer, frameRenderContext: FrameRenderContext): void {
+    const context = frameRenderContext.context;
     const gl = context.gl;
     const [bx, by, bw, bh] = prepareResult.bounds;
 
-    if (bw === 0 || bh === 0) return;
-
     context.bindFramebuffer.set(prepareResult.compositeTarget);
     context.viewport.set(prepareResult.compositeViewport);
+    frameRenderContext.invalidateTileClippingMasks();
+    if (bw === 0 || bh === 0) return;
 
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(bx, by, bw, bh);
@@ -211,20 +218,19 @@ export function drawLayerComposite(painter: Painter, opacity: number, blend: Lay
 
     let colorMode: Readonly<ColorMode>;
     if (shaderBlend) {
-        // The shader already blended against the backdrop, so its result replaces the target.
-        colorMode = painter._showOverdrawInspector ? painter.colorModeForRenderPass() : ColorMode.unblended;
+        colorMode = frameRenderContext.data.showOverdrawInspector ? frameRenderContext.colorModeForRenderPass() : ColorMode.unblended;
     } else if (blend === 'normal') {
-        colorMode = painter.colorModeForRenderPass();
+        colorMode = frameRenderContext.colorModeForRenderPass();
     } else {
         colorMode = fixedFunctionBlends[blend];
     }
     const defines = shaderBlend ? shaderBlendDefines[shaderBlend] : [];
 
-    painter.useProgram('layerComposite', null, false, defines).draw(context, gl.TRIANGLES,
+    frameRenderContext.useProgram('layerComposite', null, false, defines).draw(context, gl.TRIANGLES,
         DepthMode.disabled, StencilMode.disabled, colorMode, CullFaceMode.disabled,
         layerCompositeUniformValues(opacity, 0, 1, [bx, by]), null, null,
         layer.id, painter.viewportBuffer, painter.quadTriangleIndexBuffer,
-        painter.viewportSegments, layer.paint, painter.transform.zoom);
+        painter.viewportSegments, layer.paint, frameRenderContext.transform.zoom);
 
     gl.disable(gl.SCISSOR_TEST);
 
