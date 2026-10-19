@@ -1,7 +1,7 @@
 {
   "name": "maplibre-gl",
   "description": "BSD licensed community fork of mapbox-gl, a WebGL interactive maps library",
-  "version": "6.15.0",
+  "version": "6.15.0-lutom.1",
   "module": "dist/maplibre-gl.mjs",
   "style": "dist/maplibre-gl.css",
   "license": "BSD-3-Clause",
@@ -34,7 +34,7 @@
     "@mapbox/unitbezier": "^1.0.0",
     "@mapbox/vector-tile": "^3.0.0",
     "@maplibre/geojson-vt": "^6.3.0",
-    "@maplibre/maplibre-gl-style-spec": "^26.4.4",
+    "@maplibre/maplibre-gl-style-spec": "file:vendor/maplibre-maplibre-gl-style-spec-26.4.4-lutom.1.tgz",
     "@maplibre/mlt": "^1.3.0",
     "@maplibre/vt-pbf": "^4.3.2",
     "@types/geojson": "^7946.0.16",
@@ -168,10 +168,14 @@
   "files": [
     "build/",
     "dist/*",
-    "src/"
+    "src/",
+    "vendor/*.tgz"
   ],
   "engines": {
     "npm": ">=8.1.0",
     "node": ">=16.14.0"
-  }
+  },
+  "bundleDependencies": [
+    "@maplibre/maplibre-gl-style-spec"
+  ]
 }

@@ -5,6 +5,7 @@
 
 # Denote all files that are truly binary and should not be modified.
 *.png binary
+*.tgz binary
 *.webp binary
 *.woff2 binary
 *.mvt binary
